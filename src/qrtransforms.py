@@ -90,36 +90,75 @@ def get_homography(
 
     return H_mat
 
-
 def get_orientation(
     padded_quad_xy: np.ndarray,
     camera_intrinsic: np.ndarray,
-    len_qr: float
+    len_qr:float
 ) -> QRtransform:
-    # img_quad_xy: (4,2) corners in image pixels, consistent order with obj_pts
+    """
+    :param padded_quad_xy: (4, 2) float32 array of plane points (X, Y) with Z=0
+    :param camera_intrinsic: (3, 3) camera intrinsic matrix K
+    :return: (3, 3) rotation matrix and (3) translation matrix from qr plane to camera frame
+    """
+    K = camera_intrinsic.astype(np.float64)
+
+    img_pts = np.asarray(padded_quad_xy, dtype=np.float64).reshape(4, 2)
+
     obj_pts = np.array([
-        [-len_qr/2,   -len_qr/2, 0],
-        [-len_qr/2,   len_qr/2, 0],
-        [len_qr/2,   len_qr/2, 0],
-        [len_qr/2,   -len_qr/2, 0],
-    ], dtype=np.float32)
+        [-len_qr / 2, -len_qr / 2, 0.0],
+        [-len_qr / 2,  len_qr / 2, 0.0],
+        [ len_qr / 2,  len_qr / 2, 0.0],
+        [ len_qr / 2, -len_qr / 2, 0.0],
+    ], dtype=np.float64)
 
-    img_pts = padded_quad_xy.astype(np.float32)
+    # Build plane->image homography in *metric plane coordinates* -> image pixels
+    H, _ = cv2.findHomography(obj_pts[:, :2], img_pts, method=0)
+    if H is None:
+        raise RuntimeError("Homography estimation failed.")
 
-    dist = np.zeros((4,1), dtype=np.float32)  # if you don't have distortion
+    # Decompose: H ~ K [r1 r2 t] (up to scale)
+    nsol, Rs, Ts, Ns = cv2.decomposeHomographyMat(H, K)
 
-    ok, rvec, tvec = cv2.solvePnP(
-        obj_pts, img_pts, camera_intrinsic, dist,
-        flags=cv2.SOLVEPNP_IPPE_SQUARE  # excellent for planar squares
-    )
-    if not ok:
-        raise RuntimeError("solvePnP failed")
+    best = None
+    best_err = np.inf
 
-    R, _ = cv2.Rodrigues(rvec)
-    return QRtransform(R.astype(np.float64), tvec.astype(np.float64))
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
 
+    for i in range(nsol):
+        R = np.asarray(Rs[i], dtype=np.float64)
+        t = np.asarray(Ts[i], dtype=np.float64).reshape(3, 1)
+        n = np.asarray(Ns[i], dtype=np.float64).reshape(3, 1)
 
- 
+        # ---- (1) Cheirality: all corners in front of camera ----
+        X_cam = (R @ obj_pts.T + t).T  # (4,3)
+        if np.any(X_cam[:, 2] <= 0):
+            continue
+
+        # ---- (2) Normal direction: plane should face the camera ----
+        if n[2, 0] >= 0:
+            continue
+
+        # ---- (3) Reprojection error ----
+        x = X_cam[:, 0]
+        y = X_cam[:, 1]
+        z = X_cam[:, 2]
+
+        u = fx * (x / z) + cx
+        v = fy * (y / z) + cy
+        proj = np.stack([u, v], axis=1)
+
+        err = np.mean(np.linalg.norm(proj - img_pts, axis=1))
+
+        if err < best_err:
+            best_err = err
+            best = (R, t)
+
+    if best is None:
+        raise RuntimeError("No valid homography decomposition found (failed cheirality/normal/error checks).")
+
+    R_best, t_best = best
+    return QRtransform(R_best, t_best)
 
 
 def get_camera_intrinsic(
@@ -167,41 +206,34 @@ def _calculate_max_size(
     return N
 
 
-def get_orientation_back(
+
+
+
+
+
+def get_orientation_pnp(
     padded_quad_xy: np.ndarray,
     camera_intrinsic: np.ndarray,
+    len_qr: float
 ) -> QRtransform:
-    """
-    :param padded_quad_xy: (4, 2) float32 array of plane points (X, Y) with Z=0
-    :param camera_intrinsic: (3, 3) camera intrinsic matrix K
-    :return: (3, 3) rotation matrix and (3) translation matrix from qr plane to camera frame
-    """
-    K_mat = camera_intrinsic
-    H_mat = get_homography(padded_quad_xy)
-
-    _, Rs, Ts, _ = cv2.decomposeHomographyMat(H_mat, K_mat)
-
-    # plane_pts = np.hstack([padded_quad_xy, np.zeros((padded_quad_xy.shape[0], 1), dtype=np.float32), ])
-    plane_pts = np.array([
-        [865.6,   865.6, 0],
-        [865.6,   1365.6, 0],
-        [1365.6,   1365.6, 0],
-        [1365.6,   865.6, 0],
+    # img_quad_xy: (4,2) corners in image pixels, consistent order with obj_pts
+    obj_pts = np.array([
+        [-len_qr/2,   -len_qr/2, 0],
+        [-len_qr/2,   len_qr/2, 0],
+        [len_qr/2,   len_qr/2, 0],
+        [len_qr/2,   -len_qr/2, 0],
     ], dtype=np.float32)
 
-    best_idx = None
-    best_positive_count = -1
+    img_pts = padded_quad_xy.astype(np.float32)
 
-    for i, (R, t) in enumerate(zip(Rs, Ts)):
-        X_cam = (R @ plane_pts.T + t).T
+    dist = np.zeros((4,1), dtype=np.float32)  # if you don't have distortion
 
-        positive_depth_count = np.sum(X_cam[:, 2] > 0)
+    ok, rvec, tvec = cv2.solvePnP(
+        obj_pts, img_pts, camera_intrinsic, dist,
+        flags=cv2.SOLVEPNP_IPPE_SQUARE  # excellent for planar squares
+    )
+    if not ok:
+        raise RuntimeError("solvePnP failed")
 
-        if positive_depth_count > best_positive_count:
-            best_positive_count = positive_depth_count
-            best_idx = i
-
-    if best_idx is None or best_positive_count == 0:
-        raise RuntimeError("No valid homography decomposition found (all points behind camera).")
-
-    return QRtransform(Rs[best_idx], Ts[best_idx])
+    R, _ = cv2.Rodrigues(rvec)
+    return QRtransform(R.astype(np.float64), tvec.astype(np.float64))

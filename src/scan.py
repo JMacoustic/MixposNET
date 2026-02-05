@@ -1,36 +1,57 @@
-from qreader import QReader
+from model.qreader_moon import QReader
 import cv2
 import numpy as np
 from qrtransforms import calibrate_perspective, get_orientation, get_camera_intrinsic, QRdata, inverse_transform, multiple_transform, QRtransform
-# from qrdata import 
+from gpt_transform import *
 
 
 def scan_qr(image, detector, len_qr, fx, fy, cx, cy):
-    decodedQRs, QRlocations = detector.detect_and_decode(image=image, return_detections=True)
+    qr_1 = None
+    qr_2 = None
 
-    for (decodedQR, QRlocation) in zip(decodedQRs, QRlocations):
-        if decodedQR == 'position1':
+    K = get_camera_intrinsic(fx, fy, cx, cy)
+
+    # expects your modified QReader.detect_and_decode() that returns QRZbarInfo objects
+    infos, detections = detector.detect_and_decode(image=image, return_detections=True)
+
+    for info, det in zip(infos, detections):
+        decoded = info.decoded
+        zori = info.zbar_orientation
+
+        if decoded == "position1":
+            quad = det["padded_quad_xy"]
+            orientation = square_pose_from_4pts(quad, K, len_qr)
+
             qr_1 = QRdata(
-                decoded_qr = decodedQR,
-                center_pos = np.array(QRlocation['cxcy']),
-                corner_pos = QRlocation['padded_quad_xy'],
-                orientation = get_orientation(QRlocation['padded_quad_xy'], get_camera_intrinsic(fx, fy, cx, cy), len_qr) 
+                decoded_qr=decoded,
+                center_pos=np.asarray(det["cxcy"], dtype=np.float64),
+                corner_pos=np.asarray(quad, dtype=np.float64),
+                orientation=orientation,
             )
             print(qr_1)
 
-        elif decodedQR == 'position2':
+        elif decoded == "position2":
+            quad_raw = det["padded_quad_xy"]
+            quad = reorder_quad_by_zbar_orientation(quad_raw, zori)
+            orientation = square_pose_from_4pts(quad, K, len_qr)
+
             qr_2 = QRdata(
-                decoded_qr = decodedQR,
-                center_pos = np.array(QRlocation['cxcy']),
-                corner_pos = QRlocation['padded_quad_xy'],
-                orientation = get_orientation(QRlocation['padded_quad_xy'], get_camera_intrinsic(fx, fy, cx, cy), len_qr) 
+                decoded_qr=decoded,
+                center_pos=np.asarray(det["cxcy"], dtype=np.float64),
+                corner_pos=np.asarray(quad, dtype=np.float64),
+                orientation=orientation,
             )
             print(qr_2)
-        
+
+        elif decoded is None:
+            print("QR detected but not enough confidence")
+            pass
+
         else:
-            print(f"Unknown QR detected: {decodedQR}")
-            print(f"position: x: {QRlocation['cxcy'][0]}, y: {QRlocation['cxcy'][1]}")
-    
+            print(f"Unknown QR detected: {decoded}")
+            print(f"position: x: {det['cxcy'][0]}, y: {det['cxcy'][1]}")
+            print(f"zbar_orientation: {zori}")
+
     return qr_1, qr_2
 
 
@@ -44,8 +65,8 @@ def get_21_transform(transform_c1, transform_c2):
     
 
 if __name__ == "__main__":
-    img_calibrate = cv2.imread('images/plateimg.png')
-    img_new = cv2.imread('images/plateimg2.png')
+    img_calibrate = cv2.imread('images/cleanimg1.png')
+    img_new = cv2.imread('images/cleanimg2.png')
     detector = QReader()
 
     # Camera intrinsic parameters
@@ -68,3 +89,4 @@ if __name__ == "__main__":
 
     print(f"\n==========================\n{T_2new2.rot}")
     print(f"\n==========================\n{T_2new2.trans}")
+    print(f"\n==========================\n{transform_to_angle(T_2new2)}")
