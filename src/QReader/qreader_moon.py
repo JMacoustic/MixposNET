@@ -337,64 +337,61 @@ class QReader:
                         image=rescaled_image,
                         results=decodedQR,
                     )
-                # For QRs with black background and white foreground, try to invert the image
-                inverted_image = np.array(255) - rescaled_image
-                decodedQR = decodeQR(inverted_image, symbols=[ZBarSymbol.QRCODE])
-                if len(decodedQR) > 0:
-                    return wrap(
-                        scale_factor=scale_factor,
-                        corrections=typing.cast(CorrectionsType, label),
-                        flavor="inverted",
-                        blur_kernel_sizes=None,
-                        image=inverted_image,
-                        results=decodedQR,
-                    )
+                # # For QRs with black background and white foreground, try to invert the image
+                # inverted_image = np.array(255) - rescaled_image
+                # decodedQR = decodeQR(inverted_image, symbols=[ZBarSymbol.QRCODE])
+                # if len(decodedQR) > 0:
+                #     return wrap(
+                #         scale_factor=scale_factor,
+                #         corrections=typing.cast(CorrectionsType, label),
+                #         flavor="inverted",
+                #         blur_kernel_sizes=None,
+                #         image=inverted_image,
+                #         results=decodedQR,
+                #     )
 
-                # If it not works, try to parse to grayscale (if it is not already)
-                if len(rescaled_image.shape) == 3:
-                    assert (
-                        rescaled_image.shape[2] == 3
-                    ), f"Image must be RGB or BGR, but it has {image.shape[2]} channels."
-                    gray = cv2.cvtColor(rescaled_image, cv2.COLOR_RGB2GRAY)
-                else:
-                    gray = rescaled_image
-                decodedQR = self.__threshold_and_blur_decodings(
-                    image=gray, blur_kernel_sizes=((5, 5), (7, 7))
-                )
-                if len(decodedQR) > 0:
-                    return wrap(
-                        scale_factor=scale_factor,
-                        corrections=typing.cast(CorrectionsType, label),
-                        flavor="grayscale",
-                        blur_kernel_sizes=((5, 5), (7, 7)),
-                        image=gray,
-                        results=decodedQR,
-                    )
+                # # If it not works, try to parse to grayscale (if it is not already)
+                # if len(rescaled_image.shape) == 3:
+                #     gray = cv2.cvtColor(rescaled_image, cv2.COLOR_RGB2GRAY)
+                # else:
+                #     gray = rescaled_image
+                # decodedQR = self.__threshold_and_blur_decodings(
+                #     image=gray, blur_kernel_sizes=((5, 5), (7, 7))
+                # )
+                # if len(decodedQR) > 0:
+                #     return wrap(
+                #         scale_factor=scale_factor,
+                #         corrections=typing.cast(CorrectionsType, label),
+                #         flavor="grayscale",
+                #         blur_kernel_sizes=((5, 5), (7, 7)),
+                #         image=gray,
+                #         results=decodedQR,
+                #     )
 
-                if len(rescaled_image.shape) == 3:
-                    # If it not works, try to sharpen the image
-                    sharpened_gray = cv2.cvtColor(
-                        cv2.filter2D(
-                            src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL
-                        ),
-                        cv2.COLOR_RGB2GRAY,
-                    )
-                else:
-                    sharpened_gray = cv2.filter2D(
-                        src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL
-                    )
-                decodedQR = self.__threshold_and_blur_decodings(
-                    image=sharpened_gray, blur_kernel_sizes=((3, 3),)
-                )
-                if len(decodedQR) > 0:
-                    return wrap(
-                        scale_factor=scale_factor,
-                        corrections=typing.cast(CorrectionsType, label),
-                        flavor="grayscale",
-                        blur_kernel_sizes=((3, 3),),
-                        image=sharpened_gray,
-                        results=decodedQR,
-                    )
+                # if len(rescaled_image.shape) == 3:
+                #     # If it not works, try to sharpen the image
+                #     sharpened_gray = cv2.cvtColor(
+                #         cv2.filter2D(
+                #             src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL
+                #         ),
+                #         cv2.COLOR_RGB2GRAY,
+                #     )
+                # else:
+                #     sharpened_gray = cv2.filter2D(
+                #         src=rescaled_image, ddepth=-1, kernel=_SHARPEN_KERNEL
+                #     )
+                # decodedQR = self.__threshold_and_blur_decodings(
+                #     image=sharpened_gray, blur_kernel_sizes=((3, 3),)
+                # )
+                # if len(decodedQR) > 0:
+                #     return wrap(
+                #         scale_factor=scale_factor,
+                #         corrections=typing.cast(CorrectionsType, label),
+                #         flavor="grayscale",
+                #         blur_kernel_sizes=((3, 3),),
+                #         image=sharpened_gray,
+                #         results=decodedQR,
+                #     )
 
         return []
     

@@ -42,3 +42,36 @@ def get_camera_intrinsic(
     ])
 
     return K
+
+
+def normalize_tripoints(points: np.ndarray, eps: float = 1e-12):
+    """
+    Hartley-style normalization for 2D points.
+
+    Inputs
+    - points: (N,2)
+    Returns
+    - T: (3,3) normalization transform
+    - points_n: (N,2) normalized points
+    """
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if pts.shape[0] < 2:
+        T = np.eye(3, dtype=np.float64)
+        return T, pts.copy()
+
+    center = pts.mean(axis=0)
+    dist = np.linalg.norm(pts - center, axis=1).mean()
+    s = np.sqrt(2.0) / (dist + eps)
+
+    T = np.array(
+        [[s, 0.0, -s * center[0]],
+         [0.0, s, -s * center[1]],
+         [0.0, 0.0, 1.0]],
+        dtype=np.float64
+    )
+
+    pts_h = np.c_[pts, np.ones((pts.shape[0], 1), dtype=np.float64)]
+    pts_n_h = (T @ pts_h.T).T
+    return T, pts_n_h[:, :2]
+
+

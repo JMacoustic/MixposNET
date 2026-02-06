@@ -19,7 +19,6 @@ def scan_qr(
 
     K = get_camera_intrinsic(fx, fy, cx, cy)
 
-    # expects your modified QReader.detect_and_decode() that returns QRZbarInfo objects
     infos, detections = detector.detect_and_decode(image=image, return_detections=True)
 
     for info, det in zip(infos, detections):
@@ -27,7 +26,7 @@ def scan_qr(
         zori = info.zbar_orientation
 
         if decoded == "position1":
-            quad_raw = det["padded_quad_xy"]
+            quad_raw = det["quad_xy"]
             quad = reorder_quad(quad_raw, zori)
             orientation = pos_from_quad(quad, K, len_qr)
 
@@ -37,10 +36,9 @@ def scan_qr(
                 corner_pos=np.asarray(quad, dtype=np.float64),
                 orientation=orientation,
             )
-            print(qr_1)
 
         elif decoded == "position2":
-            quad_raw = det["padded_quad_xy"]
+            quad_raw = det["quad_xy"]
             quad = reorder_quad(quad_raw, zori)
             orientation = pos_from_quad(quad, K, len_qr)
 
@@ -50,16 +48,6 @@ def scan_qr(
                 corner_pos=np.asarray(quad, dtype=np.float64),
                 orientation=orientation,
             )
-            print(qr_2)
-
-        elif decoded is None:
-            print("QR detected but not enough confidence")
-            pass
-
-        else:
-            print(f"Unknown QR detected: {decoded}")
-            print(f"position: x: {det['cxcy'][0]}, y: {det['cxcy'][1]}")
-            print(f"zbar_orientation: {zori}")
 
     return qr_1, qr_2
 
