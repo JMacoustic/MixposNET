@@ -1,5 +1,6 @@
-import numpy as np
 from dataclasses import dataclass
+import numpy as np
+
 
 class QRtransform:
     def __init__(self, rotation: np.ndarray = np.identity(3), translation: np.ndarray = np.zeros((3, 1))):
@@ -35,8 +36,7 @@ class QRdata:
             f"  rotation :\n{fmt(self.orientation.rot)},\n"
             f"  translation :\n{fmt(self.orientation.trans)}\n"
         )
-
-
+    
 def inverse_transform(T: QRtransform):
     R_mat = T.rot
     P_vec = T.trans
