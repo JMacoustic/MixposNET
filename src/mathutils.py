@@ -1,34 +1,48 @@
 import numpy as np
-from qrdata import QRtransform
 
-def normalize_quadpoints(points: np.ndarray, eps:float = 1e-12):
-    """
-    normalize quad points (should be on the same plane)
-
-    Inputs
-    - points: 4 corner poisitions of the quad
-    - eps: epsilon for stability
+class Orientation:
+    def __init__(self, rotation: np.ndarray = np.identity(3), translation: np.ndarray = np.zeros((3, 1))):
+        self.rot = rotation
+        self.trans = translation
     
-    Returns
-    - normalization matrix
-    - normalized quad points
-    """
-    center = points.mean(axis=0)
-    dist = np.linalg.norm(points - center, axis=1).mean()
-    s = np.sqrt(2.0) / (dist + eps)
-    T = np.array([[s, 0, -s * center[0]],
-                  [0, s, -s * center[1]],
-                  [0, 0, 1]], dtype=np.float64)
-    
-    points_h = np.c_[points, np.ones((points.shape[0], 1), dtype=np.float64)]
-    points_n = np.matmul(T, points_h.T).T
+    def reset(self):
+        self.rot = np.identity(3)
+        self.trans = np.zeros((3, 1))
 
-    return T, points_n[:, :2]
+def inverse_transform(T: Orientation):
+    R_mat = T.rot
+    P_vec = T.trans
 
-def angle_from_transform(T: QRtransform):
+    R_inv = R_mat.T
+    P_inv = - np.matmul(R_inv, P_vec)
+
+    return Orientation(R_inv, P_inv)
+
+
+def multiple_transform(T1: Orientation, T2: Orientation):
+    R_mat1 = T1.rot
+    P_vec1 = T1.trans
+    R_mat2 = T2.rot
+    P_vec2 = T2.trans
+
+    R_mul = np.matmul(R_mat1, R_mat2)
+    P_mul = np.matmul(R_mat1, P_vec2) + P_vec1
+
+    return Orientation(R_mul, P_mul)
+
+def angle_from_transform(T: Orientation):
     R_mat = T.rot
     theta = np.arctan2(R_mat[1, 0], R_mat[0, 0])
     return theta
+
+def get_21_transform(transform_c1: Orientation, transform_c2: Orientation) -> Orientation:
+    """Input 2 SE3 transforms that shares same reference frame. Returns relative SE3 transform between them"""
+    T_2c = inverse_transform(transform_c2)
+    T_c1 = transform_c1
+
+    transform_21 = multiple_transform(T_2c, T_c1)
+
+    return transform_21
 
 def get_camera_intrinsic(
     fx: float, fy: float,
@@ -42,36 +56,3 @@ def get_camera_intrinsic(
     ])
 
     return K
-
-
-def normalize_tripoints(points: np.ndarray, eps: float = 1e-12):
-    """
-    Hartley-style normalization for 2D points.
-
-    Inputs
-    - points: (N,2)
-    Returns
-    - T: (3,3) normalization transform
-    - points_n: (N,2) normalized points
-    """
-    pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
-    if pts.shape[0] < 2:
-        T = np.eye(3, dtype=np.float64)
-        return T, pts.copy()
-
-    center = pts.mean(axis=0)
-    dist = np.linalg.norm(pts - center, axis=1).mean()
-    s = np.sqrt(2.0) / (dist + eps)
-
-    T = np.array(
-        [[s, 0.0, -s * center[0]],
-         [0.0, s, -s * center[1]],
-         [0.0, 0.0, 1.0]],
-        dtype=np.float64
-    )
-
-    pts_h = np.c_[pts, np.ones((pts.shape[0], 1), dtype=np.float64)]
-    pts_n_h = (T @ pts_h.T).T
-    return T, pts_n_h[:, :2]
-
-

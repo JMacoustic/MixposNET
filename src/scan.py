@@ -1,90 +1,72 @@
-from QReader.qreader_moon import QReader
 import cv2
 import numpy as np
-from qrdata import *
-from homography import *
-from mathutils import *
 from typing import Optional, Tuple
+from markerdata import MarkerData
+from mathutils import *
+from ArUco.utils import ARUCO_DICT, aruco_display
 
-def scan_qr(
+def scan_img(
     image: np.ndarray, 
-    detector: QReader, 
-    len_qr: float, 
+    len_marker: float, 
     fx: float, fy: float, 
     cx: float, cy: float
-)-> Tuple[Optional[QRdata], Optional[QRdata]]:
+)-> Tuple[Optional[Orientation], Optional[Orientation]]:
     
-    qr_1 = None
-    qr_2 = None
+    marker_1 = None
+    marker_2 = None
+    marker_3 = None
 
-    K = get_camera_intrinsic(fx, fy, cx, cy)
+    K_mat = get_camera_intrinsic(fx, fy, cx, cy)
 
-    infos, detections = detector.detect_and_decode(image=image, return_detections=True)
+    img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_100)
+    parameters = cv2.aruco.DetectorParameters_create()
+    corners, ids, rejected_img_points = cv2.aruco.detectMarkers(img_gray, aruco_dict, parameters=parameters, cameraMatrix=K_mat)
 
-    for info, det in zip(infos, detections):
-        decoded = info.decoded
-        zori = info.zbar_orientation
+    for index, corner in zip(ids, corners):
+        if index == 1:
+            rvec, tvec, markerPoints = cv2.aruco.estimatePoseSingleMarkers(corner, len_marker, K_mat)
+            marker_1 = MarkerData(index=index, corner_pos=corner, orientation=Orientation(cv2.Rodrigues(rvec), tvec.T))
 
-        if decoded == "position1":
-            quad_raw = det["quad_xy"]
-            quad = reorder_quad(quad_raw, zori)
-            orientation = pos_from_quad(quad, K, len_qr)
+        elif index == 2:
+            rvec, tvec, markerPoints = cv2.aruco.estimatePoseSingleMarkers(corner, len_marker, K_mat)
+            marker_1 = MarkerData(index=index, corner_pos=corner, orientation=Orientation(cv2.Rodrigues(rvec), tvec.T))
 
-            qr_1 = QRdata(
-                decoded_qr=decoded,
-                center_pos=np.asarray(det["cxcy"], dtype=np.float64),
-                corner_pos=np.asarray(quad, dtype=np.float64),
-                orientation=orientation,
-            )
+        elif index == 3:
+            rvec, tvec, markerPoints = cv2.aruco.estimatePoseSingleMarkers(corner, len_marker, K_mat)
+            marker_1 = MarkerData(index=index, corner_pos=corner, orientation=Orientation(cv2.Rodrigues(rvec), tvec.T))
 
-        elif decoded == "position2":
-            quad_raw = det["quad_xy"]
-            quad = reorder_quad(quad_raw, zori)
-            orientation = pos_from_quad(quad, K, len_qr)
+        # elif decoded == "position2":
+        #     pass
 
-            qr_2 = QRdata(
-                decoded_qr=decoded,
-                center_pos=np.asarray(det["cxcy"], dtype=np.float64),
-                corner_pos=np.asarray(quad, dtype=np.float64),
-                orientation=orientation,
-            )
-
-    return qr_1, qr_2
+    return marker_1, marker_2, marker_3
 
 
-def get_21_transform(transform_c1: QRtransform, transform_c2: QRtransform) -> QRtransform:
-    """Input 2 SE3 transforms that shares same reference frame. Returns relative SE3 transform between them"""
-    T_2c = inverse_transform(transform_c2)
-    T_c1 = transform_c1
-
-    transform_21 = multiple_transform(T_2c, T_c1)
-
-    return transform_21
-    
 
 if __name__ == "__main__":
-    img_calibrate = cv2.imread('images/cleanimg1.png')
-    img_new = cv2.imread('images/cleanimg2.png')
-    detector = QReader()
+    # img_calibrate = cv2.imread('images/calibrate_img.jpg')
+    img_new = cv2.imread('images/arucoimg.png')
+    
 
     # Camera intrinsic parameters
-    len_qr = 0.1
-    h, w = img_calibrate.shape[:2]
+    len_marker = 0.1
+    h, w = img_new.shape[:2]
     cx, cy = w/2, h/2
     fx = max(w, h)
     fy = max(w, h)
 
     # scan existing qr codes and print
-    qr_1, qr_2 = scan_qr(img_calibrate, detector, len_qr, fx, fy, cx, cy)
+    marker_1, marker_2, marker_3 = scan_img(img_new, len_marker, fx, fy, cx, cy)
+    print(marker_1)
 
-    # calibrate to set zero angle position
-    T_12_zero = inverse_transform(get_21_transform(qr_1.orientation, qr_2.orientation))
+    # # calibrate to set zero angle position
+    # T_12_zero = inverse_transform(get_21_transform(marker_1.orientation, marker_2.orientation))
 
-    # read new state to get rotation
-    qr_1, qr_2 = scan_qr(img_new, detector, len_qr, fx, fy, cx, cy)
-    T_21_new = get_21_transform(qr_1.orientation, qr_2.orientation)
-    T_2new2 = multiple_transform(T_21_new, T_12_zero)
+    # # read new state to get rotation
+    # marker_1, marker_2 = scan_img(img_new, len_marker, fx, fy, cx, cy)
+    # T_21_new = get_21_transform(marker_1.orientation, marker_2.orientation)
+    # T_2new2 = multiple_transform(T_21_new, T_12_zero)
 
-    print(f"\n==========================\n{T_2new2.rot}")
-    print(f"\n==========================\n{T_2new2.trans}")
-    print(f"\n==========================\n{angle_from_transform(T_2new2)*180/3.14}")
+    # print(f"\n==========================\n{T_2new2.rot}")
+    # print(f"\n==========================\n{T_2new2.trans}")
+    # print(f"\n==========================\n{angle_from_transform(T_2new2)*180/3.14}")
