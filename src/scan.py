@@ -1,22 +1,23 @@
 import cv2
 import numpy as np
 from typing import Optional, Tuple
-from markerdata import MarkerData
+from marker import MarkerData
 from mathutils import *
+from camera import CamData
 
 def scan_img(
     image: np.ndarray,
     detector: cv2.aruco.ArucoDetector,
+    camera: CamData,
     len_marker: float,
-    fx: float, fy: float,
-    cx: float, cy: float
 ):
     marker_1 = None
     marker_2 = None
     marker_3 = None
 
-    K_mat = get_camera_intrinsic(fx, fy, cx, cy).astype(np.float64)
-    dist_coeff = np.zeros((4, 1), dtype=np.float64)
+    # If calibration data is not available, should set manually.
+    # K_mat = get_camera_intrinsic(fx, fy, cx, cy).astype(np.float64)
+    # dist_coeff = np.zeros((4, 1), dtype=np.float64)
 
     img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -42,9 +43,9 @@ def scan_img(
         ok, rvec, tvec = cv2.solvePnP(
             obj_corner,
             img_pts,
-            K_mat,
-            dist_coeff,
-            flags=cv2.SOLVEPNP_IPPE_SQUARE  # planar square에 안정적 (가능하면 추천)
+            camera.camera_mat,
+            camera.distortion_coeffs,
+            flags=cv2.SOLVEPNP_IPPE_SQUARE  # robust method for planar squares
         )
         if not ok:
             continue

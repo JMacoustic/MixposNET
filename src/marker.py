@@ -2,7 +2,6 @@ from dataclasses import dataclass
 import numpy as np
 from mathutils import Orientation
 
-  
 
 @dataclass(frozen=True)
 class MarkerData:
