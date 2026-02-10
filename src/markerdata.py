@@ -21,7 +21,7 @@ class MarkerData:
 
         return (
             "\n"
-            f"========== {self.decoded_info} ==========\n"
+            f"========== {self.index} ==========\n"
             f"  corners :\n{fmt(self.corner_pos)},\n"
             f"  rotation :\n{fmt(self.orientation.rot)},\n"
             f"  translation :\n{fmt(self.orientation.trans)}\n"
