@@ -1,8 +1,8 @@
 # main.py
 import sys
-import time
 import numpy as np
 import cv2
+from cv2 import aruco
 
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap, QFont
@@ -17,17 +17,12 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
-from QReader.qreader_moon import QReader
-from scan import scan_qr, get_21_transform
-from qrdata import QRtransform, inverse_transform, multiple_transform
-from mathutils import angle_from_transform, get_camera_intrinsic
-from homography import pos_from_quad
+from scan import scan_img
+from mathutils import Orientation, get_camera_intrinsic, inverse_transform, multiple_transform, get_21_transform, angle_from_transform
 
 
 def _as_col(v: np.ndarray) -> np.ndarray:
     v = np.asarray(v, dtype=np.float64)
-    if v.shape == (3,):
-        return v.reshape(3, 1)
     if v.shape == (3, 1):
         return v
     v = v.reshape(-1)
@@ -36,7 +31,7 @@ def _as_col(v: np.ndarray) -> np.ndarray:
     return np.zeros((3, 1), dtype=np.float64)
 
 
-def _se3_to_text(T: QRtransform, name: str = "T") -> str:
+def _se3_to_text(T: Orientation, name: str) -> str:
     R = np.asarray(T.rot, dtype=np.float64).reshape(3, 3)
     t = _as_col(T.trans)
     M = np.eye(4, dtype=np.float64)
@@ -59,28 +54,23 @@ def _draw_quad(img_bgr: np.ndarray, quad_xy: np.ndarray, color: tuple[int, int, 
     pts = q.astype(np.int32).reshape(-1, 1, 2)
     cv2.polylines(img_bgr, [pts], isClosed=True, color=color, thickness=thickness, lineType=cv2.LINE_AA)
 
-    corner_colors = [
-        (0, 0, 255),
-        (0, 255, 0),
-        (255, 0, 0),
-        (0, 255, 255),
-    ]
+    corner_colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
     for i in range(4):
         p = tuple(np.round(q[i]).astype(int))
         cv2.circle(img_bgr, p, 5, corner_colors[i], -1, lineType=cv2.LINE_AA)
 
 
-def _draw_axes(img_bgr: np.ndarray, T_qr_cam: QRtransform, fx: float, fy: float, cx: float, cy: float, axis_len: float):
-    R = np.asarray(T_qr_cam.rot, dtype=np.float64).reshape(3, 3)
-    t = _as_col(T_qr_cam.trans)
+def _draw_axes(img_bgr: np.ndarray, T_marker_cam: Orientation, fx: float, fy: float, cx: float, cy: float, axis_len: float):
+    R = np.asarray(T_marker_cam.rot, dtype=np.float64).reshape(3, 3)
+    t = _as_col(T_marker_cam.trans)
 
     O = np.array([[0.0, 0.0, 0.0]], dtype=np.float64).T
     X = np.array([[axis_len, 0.0, 0.0]], dtype=np.float64).T
     Y = np.array([[0.0, axis_len, 0.0]], dtype=np.float64).T
     Z = np.array([[0.0, 0.0, axis_len]], dtype=np.float64).T
 
-    Pw = np.hstack([O, X, Y, Z])
-    Pc = (R @ Pw) + t
+    Pw = np.hstack([O, X, Y, Z])      # marker frame points
+    Pc = (R @ Pw) + t                 # camera frame points
 
     PcT = Pc.T
     if np.any(PcT[:, 2] <= 1e-6):
@@ -101,7 +91,7 @@ def _draw_axes(img_bgr: np.ndarray, T_qr_cam: QRtransform, fx: float, fy: float,
     cv2.putText(img_bgr, "z'", pz, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
 
 
-def track_quad(prev_gray: np.ndarray, gray: np.ndarray, quad_xy: np.ndarray):
+def _track_quad(prev_gray: np.ndarray, gray: np.ndarray, quad_xy: np.ndarray):
     p0 = np.asarray(quad_xy, dtype=np.float32).reshape(-1, 1, 2)
     p1, st, _ = cv2.calcOpticalFlowPyrLK(
         prev_gray, gray, p0, None,
@@ -109,7 +99,7 @@ def track_quad(prev_gray: np.ndarray, gray: np.ndarray, quad_xy: np.ndarray):
         maxLevel=3,
         criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.01),
     )
-    if p1 is None:
+    if p1 is None or st is None:
         return None
     st = st.reshape(-1)
     if int(st.sum()) < 4:
@@ -118,14 +108,15 @@ def track_quad(prev_gray: np.ndarray, gray: np.ndarray, quad_xy: np.ndarray):
 
 
 class DetectionThread(QThread):
-    resultReady = Signal(object, object)  # (qr1, qr2)
+    resultReady = Signal(object, object, object)
     error = Signal(str)
 
-    def __init__(self, frame_bgr: np.ndarray, detector: QReader, len_qr: float, fx: float, fy: float, cx: float, cy: float):
+    def __init__(self, frame_bgr: np.ndarray, detector: aruco.ArucoDetector, len_marker: float,
+                 fx: float, fy: float, cx: float, cy: float):
         super().__init__()
         self.frame_bgr = frame_bgr
         self.detector = detector
-        self.len_qr = float(len_qr)
+        self.len_marker = float(len_marker)
         self.fx = float(fx)
         self.fy = float(fy)
         self.cx = float(cx)
@@ -133,14 +124,14 @@ class DetectionThread(QThread):
 
     def run(self):
         try:
-            qr1, qr2 = scan_qr(
+            m1, m2, m3 = scan_img(
                 image=self.frame_bgr,
                 detector=self.detector,
-                len_qr=self.len_qr,
+                len_marker=self.len_marker,
                 fx=self.fx, fy=self.fy,
                 cx=self.cx, cy=self.cy,
             )
-            self.resultReady.emit(qr1, qr2)
+            self.resultReady.emit(m1, m2, m3)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -148,9 +139,11 @@ class DetectionThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("QR SE(3) Tracker")
+        self.setWindowTitle("ArUco SE(3) Tracker")
 
-        self.detector = QReader()
+        aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_100)
+        params = aruco.DetectorParameters()
+        self.detector = aruco.ArucoDetector(dictionary=aruco_dict, detectorParams=params)
 
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
@@ -160,13 +153,32 @@ class MainWindow(QMainWindow):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        self.len_qr = 0.03
+        self.len_marker = 0.03
+
         self.fx = None
         self.fy = None
         self.cx = None
         self.cy = None
 
-        self.T_12_zero = None  # 2(now)->1 at calibration
+        self.detect_every = 4
+        self.frame_idx = 0
+        self.detect_thread = None
+
+        self.prev_gray = None
+
+        self.m1 = None
+        self.m2 = None
+        self.m3 = None
+
+        self.quad1 = None
+        self.quad2 = None
+        self.quad3 = None
+
+        self.pose1 = None
+        self.pose2 = None
+        self.pose3 = None
+
+        self.T_12_zero = None
 
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignCenter)
@@ -212,22 +224,7 @@ class MainWindow(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(50)
-
-        self.frame_idx = 0
-        self.detect_every = 1  # 3~5 recommended
-        self.detect_thread = None
-
-        self.prev_gray = None
-
-        self.qr1_last = None
-        self.qr2_last = None
-
-        self.quad1 = None
-        self.quad2 = None
-
-        self.pose1 = None
-        self.pose2 = None
+        self.timer.start(30)
 
     def closeEvent(self, event):
         try:
@@ -253,20 +250,17 @@ class MainWindow(QMainWindow):
         h, w = frame_bgr.shape[:2]
         self.cx = w * 0.5
         self.cy = h * 0.5
-        self.fx = float(max(w, h))
-        self.fy = float(max(w, h))
-        print(self.fx)
-        print(self.fy)
-
+        f = float(max(w, h))
+        self.fx = f
+        self.fy = f
 
     def _start_detection(self, frame_bgr: np.ndarray):
         if self.detect_thread is not None and self.detect_thread.isRunning():
             return
-
         self.detect_thread = DetectionThread(
             frame_bgr=frame_bgr.copy(),
             detector=self.detector,
-            len_qr=self.len_qr,
+            len_marker=self.len_marker,
             fx=self.fx, fy=self.fy,
             cx=self.cx, cy=self.cy,
         )
@@ -277,28 +271,40 @@ class MainWindow(QMainWindow):
     def _on_detection_error(self, msg: str):
         pass
 
-    def _on_detection_result(self, qr1, qr2):
-        self.qr1_last = qr1
-        self.qr2_last = qr2
+    def _on_detection_result(self, m1, m2, m3):
+        self.m1, self.m2, self.m3 = m1, m2, m3
 
-        if qr1 is not None:
-            self.quad1 = np.asarray(qr1.corner_pos, dtype=np.float64).reshape(4, 2)
-            self.pose1 = qr1.orientation
+        if m1 is not None:
+            self.quad1 = np.asarray(m1.corner_pos, dtype=np.float64).reshape(4, 2)
+            self.pose1 = m1.orientation
+        else:
+            self.quad1 = None
+            self.pose1 = None
 
-        if qr2 is not None:
-            self.quad2 = np.asarray(qr2.corner_pos, dtype=np.float64).reshape(4, 2)
-            self.pose2 = qr2.orientation
+        if m2 is not None:
+            self.quad2 = np.asarray(m2.corner_pos, dtype=np.float64).reshape(4, 2)
+            self.pose2 = m2.orientation
+        else:
+            self.quad2 = None
+            self.pose2 = None
+
+        if m3 is not None:
+            self.quad3 = np.asarray(m3.corner_pos, dtype=np.float64).reshape(4, 2)
+            self.pose3 = m3.orientation
+        else:
+            self.quad3 = None
+            self.pose3 = None
 
     def on_calibrate(self):
         try:
-            if self.qr1_last is None or self.qr2_last is None:
+            if self.pose1 is None or self.pose2 is None:
                 self.T_12_zero = None
-                self.lbl_rel.setText("relative (after calib):\nNeed both position1 and position2 visible.")
+                self.lbl_rel.setText("relative (after calib):\nNeed both marker 1 and 2 visible.")
                 return
 
-            T_21 = get_21_transform(self.qr1_last.orientation, self.qr2_last.orientation)  # 1 -> 2(now)
-            self.T_12_zero = inverse_transform(T_21)  # 2(now) -> 1
-            self.lbl_rel.setText("relative (after calib):\nCalibrated. Move position2 now.")
+            T_21 = get_21_transform(self.pose1, self.pose2)   # 1 -> 2(now)
+            self.T_12_zero = inverse_transform(T_21)          # 2(now) -> 1
+            self.lbl_rel.setText("relative (after calib):\nCalibrated. Move marker 2 now.")
         except Exception as e:
             self.T_12_zero = None
             self.lbl_rel.setText(f"relative (after calib):\nCalibration error:\n{e}")
@@ -316,49 +322,42 @@ class MainWindow(QMainWindow):
         img = frame.copy()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        K = get_camera_intrinsic(self.fx, self.fy, self.cx, self.cy)
-
-        do_detect = (self.frame_idx % int(self.detect_every) == 0)
-
-        # Track quads between detections (fast)
-        if (not do_detect) and (self.prev_gray is not None):
-            if self.quad1 is not None:
-                q1 = track_quad(self.prev_gray, gray, self.quad1)
-                if q1 is not None:
-                    self.quad1 = q1
-                    try:
-                        self.pose1 = pos_from_quad(self.quad1, K, self.len_qr)
-                    except Exception:
-                        pass
-
-            if self.quad2 is not None:
-                q2 = track_quad(self.prev_gray, gray, self.quad2)
-                if q2 is not None:
-                    self.quad2 = q2
-                    try:
-                        self.pose2 = pos_from_quad(self.quad2, K, self.len_qr)
-                    except Exception:
-                        pass
-
-        # Detection every N frames (heavy) in worker thread
+        do_detect = (self.frame_idx % self.detect_every == 0)
         if do_detect:
             self._start_detection(frame)
+        else:
+            if self.prev_gray is not None:
+                if self.quad1 is not None:
+                    q = _track_quad(self.prev_gray, gray, self.quad1)
+                    if q is not None:
+                        self.quad1 = q
+                if self.quad2 is not None:
+                    q = _track_quad(self.prev_gray, gray, self.quad2)
+                    if q is not None:
+                        self.quad2 = q
+                if self.quad3 is not None:
+                    q = _track_quad(self.prev_gray, gray, self.quad3)
+                    if q is not None:
+                        self.quad3 = q
 
         self.prev_gray = gray
         self.frame_idx += 1
 
-        # Overlay (use tracked quads/poses)
         if self.quad1 is not None:
             _draw_quad(img, self.quad1, (255, 0, 255), 2)
         if self.pose1 is not None:
-            _draw_axes(img, self.pose1, self.fx, self.fy, self.cx, self.cy, axis_len=self.len_qr * 0.5)
+            _draw_axes(img, self.pose1, self.fx, self.fy, self.cx, self.cy, axis_len=self.len_marker * 0.5)
 
         if self.quad2 is not None:
             _draw_quad(img, self.quad2, (0, 165, 255), 2)
         if self.pose2 is not None:
-            _draw_axes(img, self.pose2, self.fx, self.fy, self.cx, self.cy, axis_len=self.len_qr * 0.5)
+            _draw_axes(img, self.pose2, self.fx, self.fy, self.cx, self.cy, axis_len=self.len_marker * 0.5)
 
-        # Side panel matrices (prefer latest decoded objects, fallback to tracked poses)
+        if self.quad3 is not None:
+            _draw_quad(img, self.quad3, (255, 255, 0), 2)
+        if self.pose3 is not None:
+            _draw_axes(img, self.pose3, self.fx, self.fy, self.cx, self.cy, axis_len=self.len_marker * 0.5)
+
         if self.pose1 is not None:
             self.lbl_cam_p1.setText(_se3_to_text(self.pose1, "T_cam_p1"))
         else:
@@ -369,15 +368,13 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_cam_p2.setText("T_cam_p2 =\n-")
 
-        # Relative motion after calibration
         if self.T_12_zero is not None and self.pose1 is not None and self.pose2 is not None:
             try:
-                T_21_new = get_21_transform(self.pose1, self.pose2)          # 1 -> 2(new)
-                T_2new2 = multiple_transform(T_21_new, self.T_12_zero)       # 2(old)->2(new)
+                T_21_new = get_21_transform(self.pose1, self.pose2)
+                T_2new2 = multiple_transform(T_21_new, self.T_12_zero)
                 yaw_deg = float(angle_from_transform(T_2new2) * 180.0 / np.pi)
                 t = _as_col(T_2new2.trans).reshape(3)
                 self.lbl_rel.setText(
-                    "T_2new2:\n"
                     f"{_se3_to_text(T_2new2, 'T_2new2')}\n\n"
                     f"yaw(z) [deg]: {yaw_deg:.2f}\n"
                     f"translation [m]: x={t[0]:.4f}, y={t[1]:.4f}, z={t[2]:.4f}"
@@ -386,11 +383,10 @@ class MainWindow(QMainWindow):
                 self.lbl_rel.setText(f"relative (after calib):\nCompute error:\n{e}")
         else:
             if self.T_12_zero is None:
-                self.lbl_rel.setText("relative (after calib):\nPress Calibration when both QRs are visible.")
+                self.lbl_rel.setText("relative (after calib):\nPress Calibration when marker 1 and 2 are visible.")
             else:
-                self.lbl_rel.setText("relative (after calib):\nNeed both position1 and position2 visible.")
+                self.lbl_rel.setText("relative (after calib):\nNeed both marker 1 and 2 visible.")
 
-        # Display
         try:
             rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             h, w = rgb.shape[:2]
