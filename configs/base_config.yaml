@@ -1,0 +1,4 @@
+name: base
+
+camera:
+ - cam_name: phonecam

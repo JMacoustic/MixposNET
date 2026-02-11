@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from scan import scan_img
 from camera import CamData, load_camera
@@ -295,38 +295,6 @@ class MainWindow(QMainWindow):
         T_3new1 = get_21_transform(self.pose1, self.pose3)  # m3(new) <- m1
         return multiple_transform(T_3new1, self.T_13zero)   # m3(new) <- m3(zero)
 
-    def _pick_or_fuse(self, T12: Optional[Orientation], T13: Optional[Orientation]) -> Tuple[Optional[Orientation], str]:
-        if T12 is None and T13 is None:
-            return None, "Need (1&2) or (1&3)."
-        if T12 is not None and T13 is None:
-            return T12, "Using pair 1-2."
-        if T13 is not None and T12 is None:
-            return T13, "Using pair 1-3."
-
-        R12, t12 = np.asarray(T12.rot, dtype=np.float64).reshape(3, 3), as_col(T12.trans)
-        R13, t13 = np.asarray(T13.rot, dtype=np.float64).reshape(3, 3), as_col(T13.trans)
-
-        drot = rot_angle_deg(R12, R13)
-        dtrans = float(np.linalg.norm((t12 - t13).reshape(3)))
-
-        # if drot > self.rot_diff_thresh_deg:
-        #     if self.T_plate_last is None:
-        #         return T12, f"1-2 vs 1-3 differ (rot={drot:.1f}deg, trans={dtrans:.3f}m). Using 1-2."
-
-        #     Rl = np.asarray(self.T_plate_last.rot, dtype=np.float64).reshape(3, 3)
-        #     tl = as_col(self.T_plate_last.trans)
-        #     score12 = rot_angle_deg(Rl, R12) + 1800.0 * float(np.linalg.norm((t12 - tl).reshape(3)))
-        #     score13 = rot_angle_deg(Rl, R13) + 1800.0 * float(np.linalg.norm((t13 - tl).reshape(3)))
-        #     if score12 <= score13:
-        #         return T12, f"1-2 vs 1-3 differ (rot={drot:.1f}deg, Using 1-2."
-        #     return T13, f"1-2 vs 1-3 differ (rot={drot:.1f}deg, Using 1-3."
-
-        q12 = rot_to_quat(R12)
-        q13 = rot_to_quat(R13)
-        qavg = quat_slerp(q12, q13, 0.5)
-        Ravg = quat_to_rot(qavg)
-        tavg = 0.5 * (t12 + t13)
-        return Orientation(Ravg, tavg), f"Fused 1-2 & 1-3 (rot={drot:.1f}deg)             "
 
     def update_frame(self):
         try:
@@ -363,9 +331,9 @@ class MainWindow(QMainWindow):
             self.txt_rel.setPlainText("relative (after zero):\nPress Zero button when markers 1,2,3 are visible.")
         else:
             try:
-                T12 = self._plate_motion_from_12()
-                T13 = self._plate_motion_from_13()
-                Tplate, info = self._pick_or_fuse(T12, T13)
+                T22 = self._plate_motion_from_12()
+                T33 = self._plate_motion_from_13()
+                Tplate, info = pick_or_fuse(T22, T33)
                 if Tplate is None:
                     self.txt_rel.setPlainText(f"relative (after zeroing):\n{info}")
                 else:
@@ -395,7 +363,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    CAM_NAME = "phonecam"
+    CAM_NAME = "frontcam"
     CAM_NPZ_PATH = Path("src") / "camdata" / CAM_NAME / f"{CAM_NAME}.npz"
 
     try:

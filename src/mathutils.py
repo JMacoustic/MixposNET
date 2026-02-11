@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Optional, Tuple
 
 class Orientation:
     def __init__(self, rotation: np.ndarray = np.identity(3), translation: np.ndarray = np.zeros((3, 1))):
@@ -182,3 +183,23 @@ def rot_angle_deg(Ra: np.ndarray, Rb: np.ndarray) -> float:
     c = (float(np.trace(R)) - 1.0) * 0.5
     c = _clamp(c, -1.0, 1.0)
     return float(np.degrees(np.arccos(c)))
+
+def pick_or_fuse(T22: Optional[Orientation], T33: Optional[Orientation]) -> Tuple[Optional[Orientation], str]:
+    if T22 is None and T33 is None:
+        return None, "Need (1&2) or (1&3)."
+    if T22 is not None and T33 is None:
+        return T22, "Using pair 1-2."
+    if T33 is not None and T22 is None:
+        return T33, "Using pair 1-3."
+
+    R22, t22 = np.asarray(T22.rot, dtype=np.float64).reshape(3, 3), as_col(T22.trans)
+    R33, t33 = np.asarray(T33.rot, dtype=np.float64).reshape(3, 3), as_col(T33.trans)
+
+    drot = rot_angle_deg(R22, R33)
+
+    q22 = rot_to_quat(R22)
+    q33 = rot_to_quat(R33)
+    qavg = quat_slerp(q22, q33, 0.5)
+    Ravg = quat_to_rot(qavg)
+    tavg = 0.5 * (t22 + t33)
+    return Orientation(Ravg, tavg), f"Fused 2 & 3. diff: {drot:.1f}deg"
