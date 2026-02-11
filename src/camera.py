@@ -13,6 +13,7 @@ import numpy as np
 class CamData:
     index: int = 0
     name: str = "newcamera"
+    resolution: np.ndarray = field(default_factory=lambda: np.zeros(2))
     camera_mat: np.ndarray = field(default_factory=lambda: np.eye(3, dtype=np.float64))
     distortion_coeffs: np.ndarray = field(default_factory=lambda: np.zeros((5, 1), dtype=np.float64))
 
@@ -148,7 +149,7 @@ def calibrate(
         index=int(camera.index),
         camera_mat=K,
         distortion_coeffs=dist,
-        image_size=np.array(image_size, dtype=np.int32),
+        resolution=np.array(image_size, dtype=np.int32),
         checker=np.array([cols+1, rows+1], dtype=np.int32),
         square_size=np.array([square_size], dtype=np.float64),
         rms=np.array([rms if rms is not None else np.nan], dtype=np.float64),
@@ -166,9 +167,22 @@ def calibrate(
 
     return camera
 
+def load_camera(npz_path: str | Path) -> CamData:
+    npz_path = Path(npz_path)
+    data = np.load(npz_path, allow_pickle=True)
+
+    name = str(data.get("name", npz_path.stem))
+    index = int(data.get("index", 0))
+
+    resolution = np.asarray(data["resolution"], dtype=np.int32)
+
+    K = np.asarray(data["camera_mat"], dtype=np.float64).reshape(3, 3)
+    dist = np.asarray(data["distortion_coeffs"], dtype=np.float64).reshape(-1, 1)
+
+    return CamData(index=index, name=name, resolution=resolution, camera_mat=K, distortion_coeffs=dist)
 
 if __name__ == "__main__":
-    cam = CamData(index=0, name="frontcam")
+    cam = CamData(index=1, name="phonecam")
     # inner corners: (7,6) is common for a 8x7 squares board
     calibrate(
         camera=cam,
