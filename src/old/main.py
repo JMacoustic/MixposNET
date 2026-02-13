@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from QReader.qreader_moon import QReader
-from scan import scan_qr, get_21_transform
+from scanner import scan_qr, get_21_transform
 from qrdata import QRtransform, inverse_transform, multiple_transform
 from mathutils import angle_from_transform, get_camera_intrinsic
 from homography import pos_from_quad

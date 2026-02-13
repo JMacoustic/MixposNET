@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from typing import Optional
 
-from scan import scan_img
+from scanner import scan_img
 from camera import CamData, load_camera
 from mathutils import *
 
@@ -251,14 +251,24 @@ class MainWindow(QMainWindow):
         if m1 is not None:
             self.quad1 = np.asarray(m1.corner_pos, dtype=np.float64).reshape(4, 2)
             self.pose1 = m1.orientation
+        else:
+            self.quad1 = None
+            self.pose1 = None
 
         if m2 is not None:
             self.quad2 = np.asarray(m2.corner_pos, dtype=np.float64).reshape(4, 2)
             self.pose2 = m2.orientation
+        else:
+            self.quad2 = None
+            self.pose2 = None
 
         if m3 is not None:
             self.quad3 = np.asarray(m3.corner_pos, dtype=np.float64).reshape(4, 2)
             self.pose3 = m3.orientation
+        else:
+            self.quad3 = None
+            self.pose3 = None
+
 
     def on_zeropos(self):
         try:
