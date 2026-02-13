@@ -40,8 +40,8 @@ def _reprojection_error(
 
 def calibrate(
     camera: CamData,
-    checker: Tuple[int, int],          # (cols, rows) of inner corners, e.g. (7,6)
-    square_size: float = 1.0,          # real size of a square (meters or mm; consistent unit)
+    checker: Tuple[int, int],
+    square_size: float = 1.0,
     max_iter: int = 30,
     eps: float = 1e-3,
     show: bool = True,
@@ -54,11 +54,11 @@ def calibrate(
       src/camdata/<camera.name>/<camera.name>.npz
 
     Returns:
-      camera (filled with camera_mat, distortion_coeffs)
+      camera data
 
     Notes:
       - checker is the number of squares.
-      - square_size scales the 3D object points. Use meters if you want meters.
+      - square_size scales the 3D object points. Use millimeters
     """
     cols, rows = int(checker[0]-1), int(checker[1]-1)
     if cols <= 1 or rows <= 1:
@@ -183,11 +183,10 @@ def load_camera(npz_path: str | Path) -> CamData:
 
 if __name__ == "__main__":
     cam = CamData(index=1, name="phonecam")
-    # inner corners: (7,6) is common for a 8x7 squares board
     calibrate(
         camera=cam,
         checker=(8, 7),
-        square_size=16,   # set to your real square size (e.g., 0.024 for 24mm) if you want metric scaling
+        square_size=16,   # set to your real square size in millimeter
         show=True,
         image_glob="*.jpg",
     )

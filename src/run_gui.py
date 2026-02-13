@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from typing import Optional
 
-from scanner import scan_img
+from scanner import scan_img_gui
 from camera import CamData, load_camera
 from mathutils import *
 
@@ -102,7 +102,7 @@ class DetectionThread(QThread):
 
     def run(self):
         try:
-            m1, m2, m3 = scan_img(
+            m1, m2, m3 = scan_img_gui(
                 image=self.frame_bgr,
                 detector=self.detector,
                 camera=self.camera,
