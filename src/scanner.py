@@ -62,6 +62,7 @@ class MixScanner:
         img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         img_corners, ids, rejected = self.detector.detectMarkers(img_gray)
 
+        # initialize marker 
         self.marker_1 = None
         self.marker_2 = None
         self.marker_3 = None
