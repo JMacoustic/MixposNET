@@ -86,17 +86,17 @@ class MixScanner:
             if not ok:
                 continue
 
-            R, _ = cv2.Rodrigues(rvec) 
-            t = tvec.reshape(3, 1)
+            R_mat, _ = cv2.Rodrigues(rvec) 
+            t_vec = tvec.reshape(3, 1)
 
-            m = MarkerData(index=marker_id, corner_pos=img_pts, orientation=Orientation(R, t))
+            marker = MarkerData(index=marker_id, corner_pos=img_pts, orientation=Orientation(R_mat, t_vec))
 
             if marker_id == 1:
-                self.marker_1 = m
+                self.marker_1 = marker
             elif marker_id == 2:
-                self.marker_2 = m
+                self.marker_2 = marker
             elif marker_id == 3:
-                self.marker_3 = m
+                self.marker_3 = marker
 
         return self.marker_1, self.marker_2, self.marker_3
     
@@ -159,6 +159,47 @@ class MixScanner:
         self.set_current_transform()
 
         return float(np.degrees(angle))
+    
+    def draw_quad(img_bgr: np.ndarray, quad_xy: np.ndarray, color: tuple[int, int, int], thickness: int = 2):
+        q = np.asarray(quad_xy, dtype=np.float64).reshape(4, 2)
+        pts = q.astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(img_bgr, [pts], isClosed=True, color=color, thickness=thickness, lineType=cv2.LINE_AA)
+
+        corner_colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
+        for i in range(4):
+            p = tuple(np.round(q[i]).astype(int))
+            cv2.circle(img_bgr, p, 5, corner_colors[i], -1, lineType=cv2.LINE_AA)
+
+
+    def draw_axes(img_bgr: np.ndarray, T_obj_cam: Orientation, K: np.ndarray, axis_len: float):
+        R = np.asarray(T_obj_cam.rot, dtype=np.float64).reshape(3, 3)
+        t = as_col(T_obj_cam.trans)
+
+        O = np.array([[0.0, 0.0, 0.0]], dtype=np.float64).T
+        X = np.array([[axis_len, 0.0, 0.0]], dtype=np.float64).T
+        Y = np.array([[0.0, axis_len, 0.0]], dtype=np.float64).T
+        Z = np.array([[0.0, 0.0, axis_len]], dtype=np.float64).T
+
+        Pw = np.hstack([O, X, Y, Z])
+        Pc = (R @ Pw) + t
+
+        PcT = Pc.T
+        if np.any(PcT[:, 2] <= 1e-6):
+            return
+
+        uv = project_points(PcT, K).astype(np.int32)
+        o = tuple(uv[0])
+        px = tuple(uv[1])
+        py = tuple(uv[2])
+        pz = tuple(uv[3])
+
+        cv2.line(img_bgr, o, px, (0, 0, 255), 2, lineType=cv2.LINE_AA)
+        cv2.line(img_bgr, o, py, (0, 255, 0), 2, lineType=cv2.LINE_AA)
+        cv2.line(img_bgr, o, pz, (255, 0, 0), 2, lineType=cv2.LINE_AA)
+
+        cv2.putText(img_bgr, "x'", px, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+        cv2.putText(img_bgr, "y'", py, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(img_bgr, "z'", pz, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
 
 
     def get_transform(self, image: np.ndarray):
